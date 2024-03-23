@@ -1,58 +1,102 @@
+import json
 import socket
-import sys
+import threading
 
-from Crypto import Random
-from Crypto.Cipher import PKCS1_OAEP
-from Crypto.PublicKey import RSA
-
-Random.atfork()
+SERVER = ("127.0.0.1", 8080)
+FORMAT = "utf-8"
+HEADER_SIZE = 64
 
 
-def main(argv):
-    if len(argv) != 2:
-        print(f"Usage: {argv[0]} <client port>")
-        sys.exit(1)
-    host = "127.0.0.1"
-    server_port = 8000
-    client_port = int(argv[1])
+def send_message(client, message):
+    msg_length = str(len(message))
+    msg_length = " " * (HEADER_SIZE - len(msg_length)) + msg_length
+    client.send(msg_length.encode(FORMAT))
+    client.send(message.encode(FORMAT))
 
-    BUFFER_SIZE = 2048
 
-    key = RSA.generate(1024)
-    public_key = key.publickey().export_key()
-    private_key = key
+def recieve_message(client):
+    msg_length = client.recv(HEADER_SIZE).decode(FORMAT)
+    if msg_length:
+        msg_length = int(msg_length)
+        msg = client.recv(msg_length).decode(FORMAT)
+        return msg
 
-    decryptor = PKCS1_OAEP.new(private_key)
 
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.bind((host, client_port))
-    client_socket.connect((host, server_port))
-    data = client_socket.recv(BUFFER_SIZE)
-    print(f"Received: {data.decode()}")
-    # print(f"Sending: {public_key.hex()}")
-    client_socket.sendall(public_key)
-    data = client_socket.recv(BUFFER_SIZE)
-    # print(f"Key: {data.hex()}")
-    encryption_key = RSA.import_key(data)
-    encryptor = PKCS1_OAEP.new(encryption_key)
+lock = threading.Lock()
+running = True
 
-    print("Enter 'exit' to exit")
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect(SERVER)
+nickname = ""
 
-    while True:
-        data = input("> ").encode()
-        if data == b"exit":
+response = recieve_message(client)
+print(f"Nicknames already in use: {response}")
+
+response = recieve_message(client)
+while response == "NICK":
+    with lock:
+        nickname = input("Choose a nickname: ")
+    send_message(client, nickname)
+    response = recieve_message(client)
+
+if response:
+    # print(response)
+    response = json.loads(response)
+    print(f"{response['from']} to {response['to']}: {response['message']}")
+else:
+    print("Disconnected from server!")
+
+
+def recieve():
+    global running
+    while running:
+        try:
+            response = recieve_message(client)
+            if response:
+                # print(response)
+                response = json.loads(response)
+                print(f"{response['from']} to {response['to']}: {response['message']}")
+            else:
+                print("Disconnected from server!")
+                with lock:
+                    client.close()
+                    running = False
+                break
+        except Exception as e:
+            print(f"An error occured! {e}")
+            with lock:
+                client.close()
+                running = False
             break
 
-        data = encryptor.encrypt(data)
-        # print(f"Sending: {data.hex()}")
-        client_socket.sendall(data)
-        data = client_socket.recv(BUFFER_SIZE)
-        data = decryptor.decrypt(data)
-        print(f"Received: {data.decode()}")
 
-    client_socket.close()
+def write():
+    global running
+    while running:
+        message = input()
+        if message == "!quit":
+            with lock:
+                send_message(client, "!quit")
+                client.close()
+                running = False
+                break
+        to_send = input("To: ")
+        response = json.dumps(
+            {
+                "to": to_send,
+                "from": nickname,
+                "message": message,
+            }
+        )
+
+        send_message(client, response)
 
 
-if __name__ == "__main__":
-    argv = sys.argv
-    main(argv)
+recieve_thread = threading.Thread(target=recieve)
+recieve_thread.start()
+
+write_thread = threading.Thread(target=write)
+write_thread.start()
+
+recieve_thread.join()
+write_thread.join()

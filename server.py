@@ -1,40 +1,113 @@
+import json
 import socket
-import sys
+import threading
+
+HOST = "127.0.0.1"
+PORT = 8080
+FORMAT = "utf-8"
+HEADER_SIZE = 64
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen()
+
+clients = []
+nicknames = []
 
 
-def main(argv: list[str] = []) -> None:
-    port = 8000
-    BUFFER_SIZE = 2048
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind(("127.0.0.1", port))
-        server_socket.listen(2)
-
-        print(f"Server started and listening on port {port}")
-
-        clients = []
-
-        for i in range(2):
-            client_socket, addr = server_socket.accept()
-            print(f"Connected by {addr}")
-            client_socket.sendall(f"Hello, client {chr(65+i)}!".encode())
-            encryption_key = client_socket.recv(BUFFER_SIZE)
-            clients.append((addr, client_socket, encryption_key))
-
-        for idx, (addr, client_socket, encryption_key) in enumerate(clients):
-            client_socket.sendall(clients[1 - idx][2])
-
-        while True:
-            for idx, (addr, client_socket, encryption_key) in enumerate(clients):
-                data = client_socket.recv(BUFFER_SIZE)
-                if not data:
-                    print(f"Disconnected by {addr}")
-                    client_socket.close()
-                    continue
-                print(f"Data from {chr(65+idx)}: {data.hex()}")
-                clients[1 - idx][1].sendall(data)
+def send_message(client, message):
+    msg_length = str(len(message))
+    msg_length = " " * (HEADER_SIZE - len(msg_length)) + msg_length
+    client.send(msg_length.encode(FORMAT))
+    client.send(message.encode(FORMAT))
 
 
-if __name__ == "__main__":
-    argv = sys.argv
-    main(argv)
+def recieve_message(client):
+    msg_length = client.recv(HEADER_SIZE).decode(FORMAT)
+    if msg_length:
+        msg_length = int(msg_length)
+        msg = client.recv(msg_length).decode(FORMAT)
+        return msg
+
+
+def broadcast(message):
+    response = json.dumps(
+        {
+            "to": "all",
+            "from": "server",
+            "message": message,
+        }
+    )
+    for client in clients:
+        send_message(client, response)
+
+
+def handle_message(response):
+    json_data = json.loads(response)
+    reciever = json_data["to"]
+    message = json_data["message"]
+    sender = json_data["from"]
+
+    index = nicknames.index(reciever)
+    client = clients[index]
+    send_message(client, response)
+
+
+def handle(client):
+    while True:
+        try:
+            message = recieve_message(client)
+            if message == "!quit":
+                index = clients.index(client)
+                clients.remove(client)
+                client.close()
+                nickname = nicknames[index]
+                broadcast(f"{nickname} left the chat!")
+                nicknames.remove(nickname)
+                break
+            handle_message(message)
+        except:
+            index = clients.index(client)
+            clients.remove(client)
+            client.close()
+            nickname = nicknames[index]
+            broadcast(f"{nickname} left the chat!")
+            nicknames.remove(nickname)
+            break
+
+
+def recieve():
+    while True:
+        client, address = server.accept()
+        print(f"Connected with {address}")
+
+        send_message(client, f"{nicknames}")
+
+        send_message(client, "NICK")
+        nickname = recieve_message(client)
+        while nickname in nicknames:
+            send_message(client, "NICK")
+            nickname = recieve_message(client)
+
+        nicknames.append(nickname)
+        clients.append(client)
+
+        print(f"Nickname of the client is {nickname}")
+        broadcast(f"{nickname} joined the chat!")
+        send_message(
+            client,
+            json.dumps(
+                {
+                    "to": nickname,
+                    "from": "server",
+                    "message": "Connected to the server!",
+                }
+            ),
+        )
+
+        thread = threading.Thread(target=handle, args=(client,))
+        thread.start()
+
+
+print("Server is listening...")
+recieve()
