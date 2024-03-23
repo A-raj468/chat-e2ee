@@ -2,9 +2,19 @@ import json
 import socket
 import threading
 
+from Crypto import Random
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.PublicKey import RSA
+
+Random.atfork()
+
 SERVER = ("127.0.0.1", 8080)
 FORMAT = "utf-8"
 HEADER_SIZE = 64
+
+key = RSA.generate(2048)
+private_key = key
+serialized_key = key.publickey().exportKey().decode(FORMAT)
 
 
 def send_message(client, message):
@@ -28,9 +38,18 @@ running = True
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect(SERVER)
 nickname = ""
+keys = {}
 
 response = recieve_message(client)
-print(f"Nicknames already in use: {response}")
+if response:
+    response = json.loads(response)
+    for key in response.keys():
+        keys[key] = RSA.import_key(response[key])
+    print(f"Nicknames in use: {keys.keys()}")
+else:
+    print("Disconnected from server!")
+    client.close()
+    running = False
 
 response = recieve_message(client)
 while response == "NICK":
@@ -45,6 +64,10 @@ if response:
     print(f"{response['from']} to {response['to']}: {response['message']}")
 else:
     print("Disconnected from server!")
+    client.close()
+    running = False
+
+send_message(client, serialized_key)
 
 
 def recieve():
@@ -53,9 +76,26 @@ def recieve():
         try:
             response = recieve_message(client)
             if response:
-                # print(response)
                 response = json.loads(response)
-                print(f"{response['from']} to {response['to']}: {response['message']}")
+                if response["from"] == "server":
+                    if response["type"] == "addKey":
+                        keys[response["message"]["nickname"]] = RSA.import_key(
+                            response["message"]["key"]
+                        )
+                    elif response["type"] == "delKey":
+                        keys.pop(response["message"]["nickname"])
+                    elif response["type"] == "message":
+                        print(
+                            f"{response['from']} to {response['to']}: {response['message']}"
+                        )
+                else:
+                    message = response["message"]
+                    message = (
+                        PKCS1_OAEP.new(private_key)
+                        .decrypt(bytes.fromhex(message))
+                        .decode(FORMAT)
+                    )
+                    print(f"{response['from']} to {response['to']}: {message}")
             else:
                 print("Disconnected from server!")
                 with lock:
@@ -80,10 +120,11 @@ def write():
                 client.close()
                 running = False
                 break
-        to_send = input("To: ")
+        receiver = input("To: ")
+        message = PKCS1_OAEP.new(keys[receiver]).encrypt(message.encode(FORMAT)).hex()
         response = json.dumps(
             {
-                "to": to_send,
+                "to": receiver,
                 "from": nickname,
                 "message": message,
             }

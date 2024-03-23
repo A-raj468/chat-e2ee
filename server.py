@@ -14,6 +14,8 @@ server.listen()
 clients = []
 nicknames = []
 
+keys = {}
+
 
 def send_message(client, message):
     msg_length = str(len(message))
@@ -30,12 +32,13 @@ def recieve_message(client):
         return msg
 
 
-def broadcast(message):
+def broadcast(message, type="message"):
     response = json.dumps(
         {
             "to": "all",
             "from": "server",
             "message": message,
+            "type": type,
         }
     )
     for client in clients:
@@ -45,8 +48,6 @@ def broadcast(message):
 def handle_message(response):
     json_data = json.loads(response)
     reciever = json_data["to"]
-    message = json_data["message"]
-    sender = json_data["from"]
 
     index = nicknames.index(reciever)
     client = clients[index]
@@ -62,7 +63,9 @@ def handle(client):
                 clients.remove(client)
                 client.close()
                 nickname = nicknames[index]
+                keys.pop(nickname)
                 broadcast(f"{nickname} left the chat!")
+                broadcast({"nickname": nickname, "key": ""}, type="delKey")
                 nicknames.remove(nickname)
                 break
             handle_message(message)
@@ -71,7 +74,9 @@ def handle(client):
             clients.remove(client)
             client.close()
             nickname = nicknames[index]
+            keys.pop(nickname)
             broadcast(f"{nickname} left the chat!")
+            broadcast({"nickname": nickname, "key": ""}, type="delKey")
             nicknames.remove(nickname)
             break
 
@@ -81,7 +86,7 @@ def recieve():
         client, address = server.accept()
         print(f"Connected with {address}")
 
-        send_message(client, f"{nicknames}")
+        send_message(client, json.dumps(keys))
 
         send_message(client, "NICK")
         nickname = recieve_message(client)
@@ -93,7 +98,6 @@ def recieve():
         clients.append(client)
 
         print(f"Nickname of the client is {nickname}")
-        broadcast(f"{nickname} joined the chat!")
         send_message(
             client,
             json.dumps(
@@ -104,6 +108,11 @@ def recieve():
                 }
             ),
         )
+        key = recieve_message(client)
+        keys[nickname] = key
+
+        broadcast(f"{nickname} joined the chat!")
+        broadcast({"nickname": nickname, "key": key}, type="addKey")
 
         thread = threading.Thread(target=handle, args=(client,))
         thread.start()
