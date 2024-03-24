@@ -49,6 +49,8 @@ def handle_message(response):
     json_data = json.loads(response)
     reciever = json_data["to"]
 
+    # print(json_data["message"])
+
     index = nicknames.index(reciever)
     client = clients[index]
     send_message(client, response)
@@ -118,5 +120,5 @@ def recieve():
         thread.start()
 
 
-print("Server is listening...")
+print(f"Server is listening on {HOST}:{PORT}...")
 recieve()

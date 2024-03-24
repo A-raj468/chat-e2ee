@@ -45,21 +45,24 @@ if response:
     response = json.loads(response)
     for key in response.keys():
         keys[key] = RSA.import_key(response[key])
-    print(f"Nicknames in use: {keys.keys()}")
+    print(f"Players online: {', '.join(keys.keys())}")
 else:
     print("Disconnected from server!")
     client.close()
     running = False
 
 response = recieve_message(client)
+if response == "NICK":
+    nickname = input("Choose a nickname: ")
+    send_message(client, nickname)
+    response = recieve_message(client)
 while response == "NICK":
-    with lock:
-        nickname = input("Choose a nickname: ")
+    print("Nickname already in use!")
+    nickname = input("Choose a nickname: ")
     send_message(client, nickname)
     response = recieve_message(client)
 
 if response:
-    # print(response)
     response = json.loads(response)
     print(f"{response['from']} to {response['to']}: {response['message']}")
 else:
@@ -121,6 +124,9 @@ def write():
                 running = False
                 break
         receiver = input("To: ")
+        if receiver not in keys.keys():
+            print(f"{receiver} is not online!")
+            continue
         message = PKCS1_OAEP.new(keys[receiver]).encrypt(message.encode(FORMAT)).hex()
         response = json.dumps(
             {
