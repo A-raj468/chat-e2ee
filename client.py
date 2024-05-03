@@ -3,13 +3,15 @@ import os
 import socket
 import threading
 
-from Crypto import Random
-from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Hash import SHA256
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Hash import HMAC, SHA256
+from Crypto.Protocol.KDF import PBKDF2
 from Crypto.PublicKey import RSA
+from Crypto.Random import atfork, get_random_bytes
 from Crypto.Signature import pss
+from Crypto.Util.Padding import pad, unpad
 
-Random.atfork()
+atfork()
 
 SERVER = ("127.0.0.1", 8080)
 FORMAT = "utf-8"
@@ -22,7 +24,6 @@ private_key = key
 serialized_key = key.publickey().exportKey().decode(FORMAT)
 
 encrypt_keys = {}
-sequence = {}
 
 file_name = f"./keys/{nickname}/priv.pem"
 if os.path.exists(file_name):
@@ -63,6 +64,25 @@ def verify_message(message: bytes, signature: str, sender: str) -> bool:
     verifier = pss.new(verify_key)
     try:
         verifier.verify(h, bytes.fromhex(signature))
+    except (ValueError, TypeError):
+        return False
+    return True
+
+
+def hmac_sign(message, reciever):
+    hmac_key = encrypt_keys[reciever][1]
+    hmac = HMAC.new(hmac_key, digestmod=SHA256)
+    hmac.update(message)
+    tag = hmac.digest()
+    return tag.hex()
+
+
+def hmac_verify(message, signature, sender):
+    hmac_key = encrypt_keys[sender][1]
+    hmac = HMAC.new(hmac_key, digestmod=SHA256)
+    hmac.update(message)
+    try:
+        hmac.verify(bytes.fromhex(signature))
     except (ValueError, TypeError):
         return False
     return True
@@ -129,25 +149,30 @@ def recieve():
                         if not verified:
                             print("Key verification failed!")
                             continue
-                        encrypt_keys[sender] = RSA.import_key(key)
-                        sequence[sender] = 0
-                        send_message(
-                            client,
-                            json.dumps(
-                                {
-                                    "type": "key",
-                                    "key": serialized_key,
-                                    "signature": sign_message(
-                                        serialized_key.encode(FORMAT)
-                                    ),
-                                    "from": nickname,
-                                    "to": sender,
-                                }
-                            ),
+                        keys = PBKDF2(
+                            get_random_bytes(32).hex(),
+                            get_random_bytes(32),
+                            32 * 2,
+                            count=100000,
+                            hmac_hash_module=SHA256,
                         )
+                        session_key, hmac_key = keys[:32], keys[32:]
+                        encrypt_keys[sender] = (session_key, hmac_key)
+                        keys = (session_key.hex(), hmac_key.hex())
+                        keys = json.dumps(keys).encode(FORMAT)
+                        keys = PKCS1_OAEP.new(RSA.import_key(key)).encrypt(keys).hex()
+                        message = json.dumps(
+                            {
+                                "type": "skey",
+                                "key": keys,
+                                "signature": sign_message(keys.encode(FORMAT)),
+                                "from": nickname,
+                                "to": sender,
+                            }
+                        )
+                        send_message(client, message)
                     elif response["type"] == "delKey":
                         encrypt_keys.pop(response["message"]["nickname"])
-                        sequence.pop(response["message"]["nickname"])
                     elif response["type"] == "message":
                         print(
                             f"{response['from']} to {response['to']}: {response['message']}"
@@ -155,29 +180,22 @@ def recieve():
                 else:
                     msg_type = response["type"]
                     if msg_type == "message":
+                        iv = bytes.fromhex(response["iv"])
                         message = response["message"]
                         signature = response["signature"]
                         sender = response["from"]
-                        seq = response["seq"]
-                        verified = verify_message(
+                        verified = hmac_verify(
                             message.encode(FORMAT), signature, sender
                         )
                         if not verified:
                             print("Message verification failed!")
                             continue
-                        if seq != sequence[sender]:
-                            print(
-                                "Sequence number verification failed! Message potentially dropped!"
-                            )
-                            continue
-                        message = (
-                            PKCS1_OAEP.new(private_key)
-                            .decrypt(bytes.fromhex(message))
-                            .decode(FORMAT)
-                        )
+                        message = AES.new(
+                            encrypt_keys[sender][0], AES.MODE_CBC, iv=iv
+                        ).decrypt(bytes.fromhex(message))
+                        message = unpad(message, AES.block_size).decode(FORMAT)
                         print(f"{response['from']} to {response['to']}: {message}")
-                        sequence[sender] += 1
-                    elif msg_type == "key":
+                    elif msg_type == "skey":
                         key = response["key"]
                         signature = response["signature"]
                         sender = response["from"]
@@ -185,8 +203,14 @@ def recieve():
                         if not verified:
                             print("Key verification failed!")
                             continue
-                        encrypt_keys[sender] = RSA.import_key(key)
-                        sequence[sender] = 0
+                        key = (
+                            PKCS1_OAEP.new(private_key)
+                            .decrypt(bytes.fromhex(key))
+                            .decode(FORMAT)
+                        )
+                        keys = json.loads(key)
+                        keys = bytes.fromhex(keys[0]), bytes.fromhex(keys[1])
+                        encrypt_keys[sender] = keys
             else:
                 print("Disconnected from server!")
                 with lock:
@@ -203,7 +227,6 @@ def recieve():
 
 def write():
     global running
-    seq = 0
     while running:
         message = input()
         if message == "!quit":
@@ -216,22 +239,20 @@ def write():
         if receiver not in encrypt_keys.keys():
             print(f"{receiver} is not online!")
             continue
-        message = (
-            PKCS1_OAEP.new(encrypt_keys[receiver]).encrypt(message.encode(FORMAT)).hex()
-        )
+        cipher = AES.new(encrypt_keys[receiver][0], AES.MODE_CBC)
+        message = cipher.encrypt(pad(message.encode(FORMAT), AES.block_size)).hex()
         response = json.dumps(
             {
                 "to": receiver,
                 "from": nickname,
                 "message": message,
-                "signature": sign_message(message.encode(FORMAT)),
-                "seq": seq,
+                "signature": hmac_sign(message.encode(FORMAT), receiver),
                 "type": "message",
+                "iv": cipher.iv.hex(),
             }
         )
 
         send_message(client, response)
-        seq += 1
 
 
 recieve_thread = threading.Thread(target=recieve)
