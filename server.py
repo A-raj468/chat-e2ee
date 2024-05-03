@@ -14,8 +14,6 @@ server.listen()
 clients = []
 nicknames = []
 
-keys = {}
-
 
 def send_message(client, message):
     msg_length = str(len(message))
@@ -48,9 +46,6 @@ def broadcast(message, type="message"):
 def handle_message(response):
     json_data = json.loads(response)
     reciever = json_data["to"]
-
-    # print(json_data["message"])
-
     index = nicknames.index(reciever)
     client = clients[index]
     send_message(client, response)
@@ -65,7 +60,6 @@ def handle(client):
                 clients.remove(client)
                 client.close()
                 nickname = nicknames[index]
-                keys.pop(nickname)
                 broadcast(f"{nickname} left the chat!")
                 broadcast({"nickname": nickname, "key": ""}, type="delKey")
                 nicknames.remove(nickname)
@@ -77,7 +71,6 @@ def handle(client):
             clients.remove(client)
             client.close()
             nickname = nicknames[index]
-            keys.pop(nickname)
             broadcast(f"{nickname} left the chat!")
             broadcast({"nickname": nickname, "key": ""}, type="delKey")
             nicknames.remove(nickname)
@@ -88,8 +81,6 @@ def recieve():
     while True:
         client, address = server.accept()
         print(f"Connected with {address}")
-
-        send_message(client, json.dumps(keys))
 
         send_message(client, "NICK")
         nickname = recieve_message(client)
@@ -113,7 +104,6 @@ def recieve():
             ),
         )
         message = recieve_message(client)
-        keys[nickname] = json.loads(message)["key"]
 
         broadcast(f"{nickname} joined the chat!")
         broadcast({"nickname": nickname, "message": message}, type="addKey")

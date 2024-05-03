@@ -83,17 +83,17 @@ def recieve_message(client):
         return msg
 
 
-response = recieve_message(client)
-if response:
-    response = json.loads(response)
-    for key in response.keys():
-        encrypt_keys[key] = RSA.import_key(response[key])
-        sequence[key] = 0
-    print(f"Players online: {', '.join(encrypt_keys.keys())}")
-else:
-    print("Disconnected from server!")
-    client.close()
-    running = False
+# response = recieve_message(client)
+# if response:
+#     response = json.loads(response)
+#     for key in response:
+#         encrypt_keys[key] = RSA.import_key(response[key])
+#         sequence[key] = 0
+#     print(f"Players online: {', '.join(encrypt_keys.keys())}")
+# else:
+#     print("Disconnected from server!")
+#     client.close()
+#     running = False
 
 response = recieve_message(client)
 if response == "NICK":
@@ -144,6 +144,20 @@ def recieve():
                             continue
                         encrypt_keys[sender] = RSA.import_key(key)
                         sequence[sender] = 0
+                        send_message(
+                            client,
+                            json.dumps(
+                                {
+                                    "type": "key",
+                                    "key": serialized_key,
+                                    "signature": sign_message(
+                                        serialized_key.encode(FORMAT)
+                                    ),
+                                    "from": nickname,
+                                    "to": sender,
+                                }
+                            ),
+                        )
                     elif response["type"] == "delKey":
                         encrypt_keys.pop(response["message"]["nickname"])
                         sequence.pop(response["message"]["nickname"])
@@ -152,26 +166,40 @@ def recieve():
                             f"{response['from']} to {response['to']}: {response['message']}"
                         )
                 else:
-                    message = response["message"]
-                    signature = response["signature"]
-                    sender = response["from"]
-                    seq = response["seq"]
-                    verified = verify_message(message.encode(FORMAT), signature, sender)
-                    if not verified:
-                        print("Message verification failed!")
-                        continue
-                    if seq != sequence[sender]:
-                        print(
-                            "Sequence number verification failed! Message potentially dropped!"
+                    msg_type = response["type"]
+                    if msg_type == "message":
+                        message = response["message"]
+                        signature = response["signature"]
+                        sender = response["from"]
+                        seq = response["seq"]
+                        verified = verify_message(
+                            message.encode(FORMAT), signature, sender
                         )
-                        continue
-                    message = (
-                        PKCS1_OAEP.new(private_key)
-                        .decrypt(bytes.fromhex(message))
-                        .decode(FORMAT)
-                    )
-                    print(f"{response['from']} to {response['to']}: {message}")
-                    sequence[sender] += 1
+                        if not verified:
+                            print("Message verification failed!")
+                            continue
+                        if seq != sequence[sender]:
+                            print(
+                                "Sequence number verification failed! Message potentially dropped!"
+                            )
+                            continue
+                        message = (
+                            PKCS1_OAEP.new(private_key)
+                            .decrypt(bytes.fromhex(message))
+                            .decode(FORMAT)
+                        )
+                        print(f"{response['from']} to {response['to']}: {message}")
+                        sequence[sender] += 1
+                    elif msg_type == "key":
+                        key = response["key"]
+                        signature = response["signature"]
+                        sender = response["from"]
+                        verified = verify_message(key.encode(FORMAT), signature, sender)
+                        if not verified:
+                            print("Key verification failed!")
+                            continue
+                        encrypt_keys[sender] = RSA.import_key(key)
+                        sequence[sender] = 0
             else:
                 print("Disconnected from server!")
                 with lock:
@@ -211,6 +239,7 @@ def write():
                 "message": message,
                 "signature": sign_message(message.encode(FORMAT)),
                 "seq": seq,
+                "type": "message",
             }
         )
 
