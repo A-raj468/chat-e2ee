@@ -93,9 +93,10 @@ def recieve():
 
         send_message(client, "NICK")
         nickname = recieve_message(client)
-        while nickname in nicknames:
+        if nickname in nicknames:
             send_message(client, "NICK")
-            nickname = recieve_message(client)
+            client.close()
+            continue
 
         nicknames.append(nickname)
         clients.append(client)
@@ -111,11 +112,11 @@ def recieve():
                 }
             ),
         )
-        key = recieve_message(client)
-        keys[nickname] = key
+        message = recieve_message(client)
+        keys[nickname] = json.loads(message)["key"]
 
         broadcast(f"{nickname} joined the chat!")
-        broadcast({"nickname": nickname, "key": key}, type="addKey")
+        broadcast({"nickname": nickname, "message": message}, type="addKey")
 
         thread = threading.Thread(target=handle, args=(client,))
         thread.start()

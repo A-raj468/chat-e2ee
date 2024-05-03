@@ -1,3 +1,4 @@
+keys/
 venv/
 *.pcap
 dummy/
