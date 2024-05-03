@@ -70,6 +70,7 @@ def handle(client):
                 broadcast({"nickname": nickname, "key": ""}, type="delKey")
                 nicknames.remove(nickname)
                 break
+            print(message)
             handle_message(message)
         except:
             index = clients.index(client)
