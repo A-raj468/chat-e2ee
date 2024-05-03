@@ -83,21 +83,8 @@ def recieve_message(client):
         return msg
 
 
-# response = recieve_message(client)
-# if response:
-#     response = json.loads(response)
-#     for key in response:
-#         encrypt_keys[key] = RSA.import_key(response[key])
-#         sequence[key] = 0
-#     print(f"Players online: {', '.join(encrypt_keys.keys())}")
-# else:
-#     print("Disconnected from server!")
-#     client.close()
-#     running = False
-
 response = recieve_message(client)
 if response == "NICK":
-    # nickname = input("Choose a nickname: "
     send_message(client, nickname)
     response = recieve_message(client)
 if response == "NICK":
