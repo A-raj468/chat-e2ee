@@ -49,7 +49,7 @@ python -m pip install -r requirements.txt
 ### Project structure
 
 ```
-chat_e2ee
+chat-e2ee
 ├── README.md
 ├── client.py
 ├── keys
