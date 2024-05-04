@@ -194,6 +194,10 @@ def recieve():
                             encrypt_keys[sender][0], AES.MODE_CBC, iv=iv
                         ).decrypt(bytes.fromhex(message))
                         message = unpad(message, AES.block_size).decode(FORMAT)
+                        message, sen = json.loads(message)
+                        if sen != sender:
+                            print("Message verification failed!")
+                            continue
                         print(f"{response['from']} to {response['to']}: {message}")
                     elif msg_type == "skey":
                         key = response["key"]
@@ -240,6 +244,7 @@ def write():
             print(f"{receiver} is not online!")
             continue
         cipher = AES.new(encrypt_keys[receiver][0], AES.MODE_CBC)
+        message = json.dumps([message, nickname])
         message = cipher.encrypt(pad(message.encode(FORMAT), AES.block_size)).hex()
         response = json.dumps(
             {
