@@ -53,13 +53,14 @@ chat_e2ee
 ├── README.md
 ├── client.py
 ├── keys
-│   ├── <client1>
+│   ├── <client 1>
 │   │   ├── priv.pem
 │   │   └── pub.pem
-│   ├── <client2>
-│   │   ├── priv.pem
-│   │   └── pub.pem
+│   ├── <client 2>
+│   │   ├── priv.pem
+│   │   └── pub.pem
 │   └── ...
+├── model.png
 ├── requirements.txt
 └── server.py
 ```
